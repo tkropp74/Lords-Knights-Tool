@@ -43,6 +43,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);fo
 .rbody{padding:12px;display:flex;flex-direction:column;gap:12px}
 .rbody .card{border:none;padding:4px;background:transparent}
 .rbody .card+.card{border-top:1px solid var(--line);padding-top:16px;border-radius:0}
+.imp{border:1px dashed var(--line);border-radius:8px;padding:10px 12px}
+.imp>summary{cursor:pointer;font-weight:600;color:var(--accent)}
+.imp[open]>summary{margin-bottom:10px}
+.imp>*+*{margin-top:10px}
 .calmnote{margin:0;color:var(--muted);background:var(--soft);border-radius:8px;padding:12px 14px}
 .split.calm{display:flex}
 .split,.col{display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -156,8 +160,21 @@ tr.round td{background:var(--soft);font-weight:600}
       <section class="card">
         <h2>Meine Burgen</h2>
     <p class="sub">Tippe auf eine Burg zum Bearbeiten. Den Koordinaten-Link aus dem Spiel (l+k://coordinates?…) kannst du direkt einfügen. Geschwindigkeit so eintragen, wie sie in der Einheitenansicht <em>dieser</em> Burg steht.</p>
+    <div class="grid listbar">
+      <label for="cFilter">Anzeigen<select id="cFilter"></select></label>
+      <label for="cSort">Sortieren<select id="cSort"><option value="kind">Art</option><option value="name">Name</option><option value="units">Meiste Einheiten</option><option value="dist">Entfernung</option></select></label>
+      <label for="cSearch">Suchen<input id="cSearch" type="search" placeholder="Name"></label>
+    </div>
+    <p class="hint" id="cCount"></p>
     <div class="castles" id="castles"></div>
     <button class="btn" type="button" id="add">+ Burg hinzufügen</button>
+    <details class="imp" id="impBox">
+      <summary>Aus dem Spiel übernehmen</summary>
+      <p class="hint">In der Browser-Version auf das Symbol „Rekrutierungsliste“ tippen, mit Strg+A alles markieren, mit Strg+C kopieren und hier einfügen. Übernommen werden die Anzahlen von Speerträger bis Ochsenkarren. Burgen mit gleichem Namen werden aktualisiert, neue Burgen werden angelegt. Wikinger, Belagerungswaffen, Koordinaten und Einstellungen bleiben unverändert. Hier kannst du auch eine Koordinatenliste einfügen (Zeilen „Name | X | Y | Art“), dann werden Koordinaten und Art übernommen.</p>
+      <label for="impText">Kopierte Übersicht<textarea id="impText" class="num" rows="5" spellcheck="false" placeholder="Hier die kopierte Einheitenübersicht oder Koordinatenliste einfügen"></textarea></label>
+      <div class="row-actions"><button class="btn" type="button" id="impBtn">Übernehmen</button></div>
+      <div id="impMsg"></div>
+    </details>
       </section>
     </div>
   </details>
@@ -424,7 +441,20 @@ tr.round td{background:var(--soft);font-weight:600}
     renderTargetSelect();
     const box=$("castles"); box.innerHTML="";
     if(!s.castles.length){ const e=document.createElement("p"); e.className="calmnote"; e.textContent="Noch keine Burgen eingetragen. Tippe auf „+ Burg hinzufügen“ und füge den Koordinaten-Link aus dem Spiel ein."; box.appendChild(e); }
-    s.castles.forEach((c,i)=>{
+    // Filter, Suche und Sortierung (die Indizes in s.castles bleiben unverändert)
+    const L=s.list||(s.list={filter:"all",sort:"kind",q:""});
+    const KO={burg:1,festung:2,stadt:3,metropole:4,"":5}, cnt=k=>s.castles.filter(c=>(c.kind||"")===k).length;
+    const fsel=$("cFilter"); if(fsel){ fsel.innerHTML=[["all",`Alle (${s.castles.length})`],["burg",`Burgen (${cnt("burg")})`],["festung",`Festungen (${cnt("festung")})`],["stadt",`Städte (${cnt("stadt")})`],["metropole",`Metropolen (${cnt("metropole")})`],["",`Ohne Art (${cnt("")})`]].filter(o=>o[0]==="all"||o[0]===L.filter||/\((?!0\))/.test(o[1])).map(o=>`<option value="${o[0]}">${o[1]}</option>`).join(""); fsel.value=L.filter; if(fsel.value!==L.filter){ L.filter="all"; fsel.value="all"; } }
+    const Tg=s.castles[s.target], tot=c=>UNITS.filter(u=>!u.cart).reduce((a,u)=>a+Math.max(0,c.units[u.k]||0),0);
+    const q=normName(L.q||"");
+    let order=s.castles.map((c,i)=>i).filter(i=>{ const c=s.castles[i]; return (L.filter==="all"||(c.kind||"")===L.filter)&&(!q||normName(c.name).includes(q)); });
+    const byName=(a,b)=>plainName(s.castles[a].name).localeCompare(plainName(s.castles[b].name),"de");
+    if(L.sort==="kind") order.sort((a,b)=>(KO[s.castles[a].kind||""]-KO[s.castles[b].kind||""])||byName(a,b));
+    else if(L.sort==="name") order.sort(byName);
+    else if(L.sort==="units") order.sort((a,b)=>tot(s.castles[b])-tot(s.castles[a])||byName(a,b));
+    else if(L.sort==="dist"&&Tg&&validC(Tg)) order.sort((a,b)=>{ const A=s.castles[a],B=s.castles[b]; return (validC(A)?dist(A,Tg):1e9)-(validC(B)?dist(B,Tg):1e9)||byName(a,b); });
+    const cc=$("cCount"); if(cc) cc.textContent=s.castles.length?`${order.length} von ${s.castles.length} angezeigt`+(L.sort==="dist"&&!(Tg&&validC(Tg))?" · Für „Entfernung“ oben in der Deff-Brücke ein angegriffenes Habitat wählen.":""):"";
+    order.forEach(i=>{ const c=s.castles[i];
       const d=document.createElement("details"); d.className="castle"+(useProf(c)?" prof":""); if(c._open) d.open=true;
       d.innerHTML=`<summary id="head${i}">${headHTML(c,i)}</summary>
         <div class="body">
@@ -543,6 +573,58 @@ tr.round td{background:var(--soft);font-weight:600}
     const v=$("verdict"); put("deff",first(v)||"Noch nichts geplant",cls(v));
     const a=$("atkVerdict"); put("angriff",first(a)||"Noch kein Ziel",cls(a));
   }
+  // Import der Einheitenübersicht aus der Browser-Version: Name, dann 14 Zahlen (6 Rohstoffe/Silber, 8 Einheiten).
+  // Laufende Rekrutierungen erscheinen als Zeitangabe mit folgender Zahl und werden übersprungen.
+  const IMP_UNITS=["sp","sk","bs","ab","pr","lr","hk","ok"];
+  const normName=x=>String(x).replace(/亗/g,"").replace(/\s+/g," ").trim().toLowerCase();
+  const plainName=x=>normName(x).replace(/\d\uFE0F?\u20E3/g,"").replace(/[^\p{L}\p{N}' ]/gu,"").replace(/\s+/g," ").trim();
+  function parseOverview(txt){
+    const TIMER=/^(\d+\s*(Tage?|Stunden?|Minuten?|Sekunden?)\s*)+$/i, NUM=/^-?\d{1,3}(\.\d{3})+$|^-?\d+$/;
+    let blocks=[], cur=null, skip=false;
+    String(txt).split(/\r?\n/).forEach(raw=>{ let l=raw.trim(); if(!l) return;
+      const lab=l.match(/^[^:]{1,30}:\s*(.+)$/); if(lab&&/^name$/i.test(l.split(":")[0].trim())) l=lab[1].trim(); else if(lab&&NUM.test(lab[1].trim())) l=lab[1].trim();
+      if(TIMER.test(l)){ skip=true; return; }
+      if(NUM.test(l)){ if(skip){ skip=false; return; } if(cur) cur.nums.push(Number(l.replace(/\./g,""))); return; }
+      skip=false; cur={name:l.replace(/亗/g,"").replace(/\s+/g," ").trim(),nums:[]}; blocks.push(cur); });
+    return {ok:blocks.filter(b=>b.nums.length===14), bad:blocks.filter(b=>b.nums.length>6&&b.nums.length!==14)};
+  }
+  function applyOverview(txt){
+    const {ok,bad}=parseOverview(txt); let upd=0, add=0;
+    ok.forEach(b=>{ let c=s.castles.find(x=>normName(x.name)===normName(b.name));
+      if(!c){ const pk=plainName(b.name), cand=s.castles.filter(x=>plainName(x.name)===pk); if(cand.length===1&&ok.filter(o=>plainName(o.name)===pk).length===1) c=cand[0]; }
+      if(!c){ c={name:b.name,x:NaN,y:NaN,kind:"",custom:true,speed:blankSpeed(),units:blankUnits()}; s.castles.push(c); add++; } else upd++;
+      IMP_UNITS.forEach((k,i)=>{ c.units[k]=b.nums[6+i]; }); });
+    return {upd,add,bad,total:ok.length};
+  }
+  // Koordinatenliste: „Name | X | Y | Art“ (Art: Burg/Festung/Stadt/Metropole oder Spielcode 0/2/4)
+  const KIND_IN={"burg":"burg","0":"burg","festung":"festung","2":"festung","stadt":"stadt","4":"stadt","metropole":"metropole"};
+  function findCastle(name,pool){ let c=s.castles.find(x=>normName(x.name)===normName(name)); if(c) return c;
+    const pk=plainName(name), cand=s.castles.filter(x=>plainName(x.name)===pk); return cand.length===1&&pool.filter(n=>plainName(n)===pk).length===1?cand[0]:null; }
+  function applyCoords(txt){
+    const RE=/^(.+?)\s*\|\s*(\d{3,6})\s*\|\s*(\d{3,6})\s*(?:\|\s*(\S+))?\s*$/;
+    const rows=String(txt).split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith("#")).map(l=>l.match(RE)).filter(Boolean);
+    if(!rows.length) return null; const names=rows.map(r=>r[1]); let upd=0, add=0;
+    rows.forEach(r=>{ const name=r[1].replace(/亗/g,"").replace(/\s+/g," ").trim(), kind=KIND_IN[String(r[4]||"").toLowerCase()]||"";
+      let c=findCastle(name,names);
+      if(!c){ c={name,x:NaN,y:NaN,kind:"",custom:false,speed:blankSpeed(),units:blankUnits()}; s.castles.push(c); add++; } else upd++;
+      c.x=Number(r[2]); c.y=Number(r[3]); if(kind){ c.kind=kind; if(c.custom&&!UNITS.some(u=>parseSpeed(c.speed[u.k]))) c.custom=false; } });
+    return {upd,add,total:rows.length};
+  }
+  function bindImport(){
+    $("impBtn").addEventListener("click",()=>{ const m=$("impMsg"), cr=applyCoords($("impText").value);
+      if(cr){ renderCastles(); update(); m.className="verdict"; m.innerHTML=`${cr.total} Koordinaten übernommen<p>${cr.upd} Burgen aktualisiert, ${cr.add} neu angelegt. Art und Lage sind gesetzt.</p>`; $("impText").value=""; return; }
+      const r=applyOverview($("impText").value);
+      if(!r.total){ m.className="verdict bad"; m.innerHTML="Keine Burgen erkannt<p>Kopiere bitte die komplette Einheitenübersicht aus der Browser-Version und füge sie unverändert ein.</p>"; return; }
+      renderCastles(); update();
+      m.className=r.bad.length?"verdict warn":"verdict";
+      m.innerHTML=`${r.total} Burgen übernommen<p>${r.upd} aktualisiert, ${r.add} neu angelegt.${r.add?" Bei neuen Burgen fehlen noch Koordinaten und Art.":""}${r.bad.length?` Nicht lesbar: ${r.bad.map(b=>esc(b.name)).join(", ")}.`:""}</p>`;
+      $("impText").value=""; });
+  }
+  function bindList(){ const L=s.list||(s.list={filter:"all",sort:"kind",q:""});
+    $("cSort").value=L.sort; $("cSearch").value=L.q||"";
+    $("cFilter").addEventListener("change",e=>{ L.filter=e.target.value; save(); renderCastles(); });
+    $("cSort").addEventListener("change",e=>{ L.sort=e.target.value; save(); renderCastles(); });
+    $("cSearch").addEventListener("input",e=>{ L.q=e.target.value; save(); renderCastles(); const f=$("cSearch"); if(f&&f.focus) f.focus(); }); }
   function bindRubs(){ s.open=s.open||{};
     document.querySelectorAll("details.rub").forEach(d=>{ if(s.open[d.id]) d.open=true; d.addEventListener("toggle",()=>{ s.open[d.id]=d.open; save(); }); }); }
   function update(){
@@ -695,7 +777,7 @@ tr.round td{background:var(--soft);font-weight:600}
     $("atkTime").addEventListener("input",e=>{ A.time=e.target.value; update(); });
     $("atkFree").checked=!!A.free; $("atkFree").addEventListener("change",e=>{ A.free=e.target.checked; update(); });
   })();
-  bindRubs();
+  bindRubs(); bindImport(); bindList();
   $("deffUnits").value=s.deffUnits; $("deffUnits").addEventListener("change",e=>{ s.deffUnits=e.target.value; update(); });
   $("profType").addEventListener("change",e=>{ s.profType=e.target.value; renderProfiles(); save(); });
   renderProfiles(); renderCastles(); update();
